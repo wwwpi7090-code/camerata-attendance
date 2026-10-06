@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d6b6f">
+<title>Camerata Attendance</title>
+<style>
+:root{
+  --ink:#1c2b2c; --muted:#6b7a7b; --teal:#0d6b6f; --aqua:#5cc8c0;
+  --page:#f2f6f6; --sheet:#ffffff; --rule:#d5e2e3; --margin:#d9534f; --today:#e6f5f3;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--page); color:var(--ink);
+  font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  -webkit-tap-highlight-color:transparent;
+}
+.wrap{max-width:1000px;margin:0 auto;padding:18px 12px 48px}
+h1{margin:0;font-weight:300;font-size:clamp(1.05rem,5vw,1.45rem);letter-spacing:.12em;color:var(--teal);white-space:nowrap}
+h1 b{font-weight:600}
+.summary{color:var(--muted);font-size:.92rem;margin:2px 0 16px}
+.bar{display:flex;align-items:center;gap:6px;margin-bottom:10px}
+.month{font-size:1.1rem;font-weight:600;flex:1;text-align:center;white-space:nowrap}
+.spacer{flex:1}
+button{font:inherit;color:inherit;cursor:pointer;border:1px solid var(--rule);background:var(--sheet);
+  border-radius:8px;min-height:44px;padding:0 14px}
+button:focus-visible,input:focus-visible,td.cell:focus-visible{outline:3px solid var(--aqua);outline-offset:-3px}
+button.icon{width:44px;padding:0;font-size:1.4rem;line-height:1}
+button.primary{background:var(--teal);color:#fff;border-color:var(--teal)}
+button.danger{color:#b3261e;border-color:#efc9c6}
+button.plain{border:none;background:none;color:var(--teal);text-decoration:underline;padding:0 6px;min-height:40px}
+
+/* The register sheet */
+.sheet{overflow-x:auto;background:var(--sheet);border:1px solid var(--rule);border-radius:6px;
+  box-shadow:0 1px 0 var(--rule)}
+table.grid{border-collapse:separate;border-spacing:0;min-width:100%}
+.grid th,.grid td{border-bottom:1px solid var(--rule);padding:0;text-align:center}
+.grid tr:last-child td{border-bottom:none}
+.grid .name{
+  position:sticky;left:0;z-index:2;background:var(--sheet);text-align:left;
+  padding:0 12px;min-width:132px;max-width:46vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  border-right:2px solid var(--margin);
+}
+.grid thead .name{font-size:.8rem;color:var(--muted);font-weight:600;vertical-align:bottom;padding-bottom:10px}
+.grid th.date{border-left:1px solid var(--rule);vertical-align:top}
+.grid th.date button{border:none;border-radius:0;background:none;width:100%;min-width:78px;
+  padding:8px 4px;line-height:1.2;display:block}
+.d1{font-weight:600}
+.d2{font-size:.78rem;color:var(--muted)}
+.lbl{font-size:.72rem;color:var(--teal);margin:3px auto 0;max-width:84px;white-space:normal}
+td.cell{height:54px;min-width:78px;border-left:1px solid var(--rule);cursor:pointer;user-select:none;
+  font-size:1.7rem;color:var(--teal);font-weight:600}
+td.cell.on::after{content:"✓"}
+td.cell:active{background:#d3ece9}
+.today{background:var(--today)}
+tr.removed .name{color:var(--muted);font-style:italic}
+.empty{padding:28px 16px;text-align:center;color:var(--muted)}
+
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 28px}
+
+/* Statistics */
+.stats{display:grid;grid-template-columns:1fr;gap:16px}
+@media(min-width:720px){.stats{grid-template-columns:1fr 1fr}}
+.stats section{background:var(--sheet);border:1px solid var(--rule);border-radius:6px;padding:12px 14px}
+.stats h2{font-size:1rem;margin:0 0 2px}
+.stats .sub{font-size:.82rem;color:var(--muted);margin-bottom:8px}
+.row{display:flex;gap:10px;padding:6px 0;border-top:1px solid var(--rule);font-variant-numeric:tabular-nums}
+.row .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .c{color:var(--muted);min-width:4.2em;text-align:right}
+.row .p{min-width:4.2em;text-align:right;font-weight:600}
+.note{font-size:.8rem;color:var(--muted);margin-top:14px}
+footer{margin-top:24px;font-size:.85rem;color:var(--muted);display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+
+/* Dialogs */
+dialog{border:none;border-radius:12px;padding:18px;width:min(460px,94vw);color:var(--ink);
+  box-shadow:0 10px 40px rgba(0,0,0,.25)}
+dialog::backdrop{background:rgba(20,40,40,.45)}
+dialog h3{margin:0 0 12px;font-size:1.1rem}
+dialog label{display:block;font-size:.85rem;color:var(--muted);margin:10px 0 4px}
+dialog input[type=text],dialog input[type=date]{width:100%;font:inherit;min-height:44px;padding:0 10px;
+  border:1px solid var(--rule);border-radius:8px;background:#fff;color:var(--ink)}
+.dlg-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
+.mrow{display:flex;gap:8px;margin-bottom:8px}
+.mrow input{flex:1}
+.mlist{max-height:50vh;overflow-y:auto;padding-right:2px}
+.removed-list{margin-top:14px;border-top:1px solid var(--rule);padding-top:10px}
+.removed-list .mrow span{flex:1;align-self:center;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>CAMERATA <b>ATTENDANCE</b></h1>
+  <div class="summary" id="summary"></div>
+
+  <div class="bar">
+    <button class="icon" id="prev" aria-label="Previous month">‹</button>
+    <div class="month" id="monthTitle"></div>
+    <button class="icon" id="next" aria-label="Next month">›</button>
+    <button id="thisMonth">Today</button>
+  </div>
+
+  <div class="sheet" id="sheet"></div>
+
+  <div class="actions">
+    <button id="addRehearsalBtn">+ Add Rehearsal</button>
+    <button id="membersBtn">Members</button>
+  </div>
+
+  <div class="stats">
+    <section><h2 id="mTitle"></h2><div class="sub" id="mSub"></div><div id="mList"></div></section>
+    <section><h2 id="yTitle"></h2><div class="sub" id="ySub"></div><div id="yList"></div></section>
+  </div>
+  <p class="note">A rehearsal is counted in the statistics once at least one member is ticked. Mondays with no ticks (holidays, future dates) are ignored.</p>
+
+  <footer>
+    Data is saved on this device only.
+    <button class="plain" id="backupBtn">Download backup</button>
+    <button class="plain" id="restoreBtn">Restore backup</button>
+    <input type="file" id="restoreFile" accept="application/json,.json" hidden>
+  </footer>
+</div>
+
+<!-- Members -->
+<dialog id="membersDlg">
+  <h3>Members</h3>
+  <div class="mlist" id="mEdit"></div>
+  <label for="newName">Add member</label>
+  <div class="mrow">
+    <input type="text" id="newName" placeholder="Full name" autocomplete="off">
+    <button class="primary" id="addMemberBtn">Add</button>
+  </div>
+  <div id="removedBox"></div>
+  <div class="dlg-actions"><button id="closeMembers">Done</button></div>
+</dialog>
+
+<!-- Add rehearsal -->
+<dialog id="addDlg">
+  <h3>Add rehearsal</h3>
+  <label for="addDate">Date</label>
+  <input type="date" id="addDate">
+  <label for="addLabel">Label (optional)</label>
+  <input type="text" id="addLabel" placeholder="e.g. Workshop">
+  <div class="dlg-actions">
+    <button id="addCancel">Cancel</button>
+    <button class="primary" id="addSave">Add rehearsal</button>
+  </div>
+</dialog>
+
+<!-- Edit rehearsal -->
+<dialog id="editDlg">
+  <h3 id="editTitle"></h3>
+  <label for="editLabel">Label (optional)</label>
+  <input type="text" id="editLabel" placeholder="e.g. Pre-concert Rehearsal">
+  <div class="dlg-actions">
+    <button class="danger" id="editDelete">Delete rehearsal</button>
+    <span class="spacer"></span>
+    <button id="editCancel">Cancel</button>
+    <button class="primary" id="editSave">Save</button>
+  </div>
+</dialog>
+
+<script>
+(function(){
+const KEY = 'camerata-attendance-v1';
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTH = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DAY = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+/* ---------- Data ----------
+ members:  [{id, name, removed:false}]
+ extras:   {"2026-10-17": true}      added rehearsals
+ skipped:  {"2026-12-28": true}      deleted Mondays
+ labels:   {"2026-10-17": "Workshop"}
+ att:      {"2026-10-05": {memberId: 1}}
+*/
+function blank(){ return {members:[], extras:{}, skipped:{}, labels:{}, att:{}}; }
+function load(){
+  try{
+    const d = JSON.parse(localStorage.getItem(KEY));
+    if(d && Array.isArray(d.members)) return Object.assign(blank(), d);
+  }catch(e){}
+  return blank();
+}
+let data = load();
+function save(){
+  try{ localStorage.setItem(KEY, JSON.stringify(data)); }
+  catch(e){ alert('Could not save on this device. Please download a backup.'); }
+}
+
+/* ---------- Dates ---------- */
+const pad = n => String(n).padStart(2,'0');
+const iso = (y,m,d) => `${y}-${pad(m+1)}-${pad(d)}`;
+const parse = s => { const [y,m,d] = s.split('-').map(Number); return {y, m:m-1, d}; };
+const weekday = s => { const p = parse(s); return new Date(p.y,p.m,p.d).getDay(); };
+const fmt = s => { const p = parse(s); return `${p.d} ${MON[p.m]} ${p.y}`; };
+function todayIso(){ const t = new Date(); return iso(t.getFullYear(), t.getMonth(), t.getDate()); }
+
+function mondays(y,m){
+  const out = [], days = new Date(y,m+1,0).getDate();
+  for(let d=1; d<=days; d++) if(new Date(y,m,d).getDay()===1) out.push(iso(y,m,d));
+  return out;
+}
+// m === null → whole year
+function rehearsals(y,m){
+  const set = new Set();
+  const months = m===null ? [0,1,2,3,4,5,6,7,8,9,10,11] : [m];
+  months.forEach(mm => mondays(y,mm).forEach(d => { if(!data.skipped[d]) set.add(d); }));
+  Object.keys(data.extras).forEach(d => {
+    const p = parse(d);
+    if(p.y===y && (m===null || p.m===m)) set.add(d);
+  });
+  return [...set].sort();
+}
+const ticks = d => data.att[d] ? Object.keys(data.att[d]).length : 0;
+const isOn = (d,id) => !!(data.att[d] && data.att[d][id]);
+
+/* ---------- View state ---------- */
+const now = new Date();
+let vy = now.getFullYear(), vm = now.getMonth();
+
+const $ = id => document.getElementById(id);
+function el(tag, cls, text){ const e = document.createElement(tag); if(cls) e.className = cls; if(text!=null) e.textContent = text; return e; }
+
+// Members shown for a set of dates: active ones, plus removed ones who have ticks there
+function membersFor(dates){
+  return data.members.filter(m => !m.removed || dates.some(d => isOn(d, m.id)));
+}
+
+/* ---------- Render ---------- */
+function render(){
+  renderSummary();
+  renderGrid();
+  renderStats();
+}
+
+function renderSummary(){
+  const active = data.members.filter(m => !m.removed).length;
+  const held = rehearsals(vy, null).filter(d => ticks(d) > 0).length;
+  $('summary').textContent = `Members: ${active}   ·   Rehearsals in ${vy}: ${held}`;
+}
+
+function renderGrid(){
+  $('monthTitle').textContent = `${MONTH[vm]} ${vy}`;
+  const sheet = $('sheet');
+  sheet.innerHTML = '';
+  const dates = rehearsals(vy, vm);
+  const members = membersFor(dates);
+  const today = todayIso();
+
+  if(!data.members.length){
+    const e = el('div','empty');
+    e.append(el('p',null,'No members yet. Add your choir members to start.'));
+    const b = el('button','primary','Add members'); b.onclick = openMembers;
+    e.append(b); sheet.append(e); return;
+  }
+
+  const t = el('table','grid');
+  const hr = el('tr');
+  hr.append(el('th','name','Member'));
+  dates.forEach(d => {
+    const th = el('th','date' + (d===today ? ' today' : ''));
+    const b = el('button');
+    b.setAttribute('aria-label', `Edit rehearsal ${fmt(d)}`);
+    const p = parse(d);
+    b.append(el('div','d1',`${p.d} ${MON[p.m]}`));
+    b.append(el('div','d2', `${weekday(d)===1 ? '' : DAY[weekday(d)].slice(0,3)+' '}${p.y}`));
+    if(data.labels[d]) b.append(el('div','lbl',data.labels[d]));
+    b.onclick = () => openEdit(d);
+    th.append(b); hr.append(th);
+  });
+  const thead = el('thead'); thead.append(hr); t.append(thead);
+
+  const tb = el('tbody');
+  members.forEach(m => {
+    const tr = el('tr', m.removed ? 'removed' : '');
+    const nm = el('td','name', m.name + (m.removed ? ' (removed)' : ''));
+    nm.title = m.name; tr.append(nm);
+    dates.forEach(d => {
+      const td = el('td','cell' + (isOn(d,m.id) ? ' on' : '') + (d===today ? ' today' : ''));
+      td.tabIndex = 0;
+      td.setAttribute('role','checkbox');
+      td.setAttribute('aria-checked', isOn(d,m.id));
+      td.setAttribute('aria-label', `${m.name}, ${fmt(d)}`);
+      td.onclick = () => toggle(d, m.id, td);
+      td.onkeydown = e => { if(e.key===' '||e.key==='Enter'){ e.preventDefault(); toggle(d,m.id,td); } };
+      tr.append(td);
+    });
+    tb.append(tr);
+  });
+  t.append(tb);
+  sheet.append(t);
+  if(!dates.length) sheet.append(el('div','empty','No rehearsals this month.'));
+}
+
+function toggle(d, id, td){
+  if(!data.att[d]) data.att[d] = {};
+  if(data.att[d][id]) delete data.att[d][id]; else data.att[d][id] = 1;
+  if(!Object.keys(data.att[d]).length) delete data.att[d];
+  save();
+  const on = isOn(d,id);
+  td.classList.toggle('on', on);
+  td.setAttribute('aria-checked', on);
+  renderSummary();
+  renderStats();
+}
+
+function pct(a,b){ if(!b) return '–'; const p = Math.round(a/b*1000)/10; return p + '%'; }
+
+function statList(box, dates){
+  box.innerHTML = '';
+  const held = dates.filter(d => ticks(d) > 0);
+  const members = membersFor(held);
+  if(!held.length){ const r = el('div','row'); r.append(el('span','n','No attendance recorded yet.')); box.append(r); return 0; }
+  members.forEach(m => {
+    const c = held.filter(d => isOn(d, m.id)).length;
+    const r = el('div','row');
+    r.append(el('span','n', m.name + (m.removed ? ' (removed)' : '')));
+    r.append(el('span','c', `${c} / ${held.length}`));
+    r.append(el('span','p', pct(c, held.length)));
+    box.append(r);
+  });
+  return held.length;
+}
+
+function renderStats(){
+  const isCurrent = vy===now.getFullYear() && vm===now.getMonth();
+  $('mTitle').textContent = (isCurrent ? 'This month: ' : '') + `${MONTH[vm]} ${vy}`;
+  $('yTitle').textContent = (vy===now.getFullYear() ? 'This year: ' : '') + vy;
+  const mh = statList($('mList'), rehearsals(vy, vm));
+  const yh = statList($('yList'), rehearsals(vy, null));
+  $('mSub').textContent = `${mh} rehearsal${mh===1?'':'s'} held`;
+  $('ySub').textContent = `${yh} rehearsal${yh===1?'':'s'} held`;
+}
+
+/* ---------- Month navigation ---------- */
+$('prev').onclick = () => { vm--; if(vm<0){vm=11;vy--;} render(); };
+$('next').onclick = () => { vm++; if(vm>11){vm=0;vy++;} render(); };
+$('thisMonth').onclick = () => { vy = now.getFullYear(); vm = now.getMonth(); render(); };
+
+/* ---------- Members ---------- */
+function newId(){ return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+
+function renderMembersDlg(){
+  const box = $('mEdit'); box.innerHTML = '';
+  const active = data.members.filter(m => !m.removed);
+  if(!active.length) box.append(el('p','sub','No members yet.'));
+  active.forEach(m => {
+    const r = el('div','mrow');
+    const inp = el('input'); inp.type = 'text'; inp.value = m.name;
+    inp.setAttribute('aria-label','Member name');
+    inp.onchange = () => {
+      const v = inp.value.trim();
+      if(v){ m.name = v; save(); render(); } else inp.value = m.name;
+    };
+    const rm = el('button','danger','Remove');
+    rm.onclick = () => {
+      if(confirm(`Remove ${m.name}?\nTheir past attendance stays in the statistics.`)){
+        m.removed = true; save(); renderMembersDlg(); render();
+      }
+    };
+    r.append(inp, rm); box.append(r);
+  });
+
+  const rb = $('removedBox'); rb.innerHTML = '';
+  const removed = data.members.filter(m => m.removed);
+  if(removed.length){
+    const wrap = el('div','removed-list');
+    wrap.append(el('label',null,'Removed members'));
+    removed.forEach(m => {
+      const r = el('div','mrow');
+      r.append(el('span',null,m.name));
+      const b = el('button',null,'Restore');
+      b.onclick = () => { m.removed = false; save(); renderMembersDlg(); render(); };
+      r.append(b); wrap.append(r);
+    });
+    rb.append(wrap);
+  }
+}
+function openMembers(){ renderMembersDlg(); $('membersDlg').showModal(); }
+function addMember(){
+  const v = $('newName').value.trim();
+  if(!v) return;
+  data.members.push({id:newId(), name:v, removed:false});
+  save(); $('newName').value = ''; renderMembersDlg(); render(); $('newName').focus();
+}
+$('membersBtn').onclick = openMembers;
+$('addMemberBtn').onclick = addMember;
+$('newName').onkeydown = e => { if(e.key==='Enter'){ e.preventDefault(); addMember(); } };
+$('closeMembers').onclick = () => $('membersDlg').close();
+
+/* ---------- Add rehearsal ---------- */
+$('addRehearsalBtn').onclick = () => {
+  $('addDate').value = todayIso(); $('addLabel').value = '';
+  $('addDlg').showModal();
+};
+$('addCancel').onclick = () => $('addDlg').close();
+$('addSave').onclick = () => {
+  const d = $('addDate').value;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d)){ alert('Choose a date.'); return; }
+  const lbl = $('addLabel').value.trim();
+  if(weekday(d)===1 && !data.skipped[d] && !lbl){ alert(`${fmt(d)} is already a Monday rehearsal.`); return; }
+  delete data.skipped[d];
+  if(weekday(d)!==1) data.extras[d] = true;
+  if(lbl) data.labels[d] = lbl;
+  save();
+  const p = parse(d); vy = p.y; vm = p.m;
+  $('addDlg').close(); render();
+};
+
+/* ---------- Edit / delete rehearsal ---------- */
+let editing = null;
+function openEdit(d){
+  editing = d;
+  $('editTitle').textContent = `${DAY[weekday(d)]} ${fmt(d)}`;
+  $('editLabel').value = data.labels[d] || '';
+  $('editDlg').showModal();
+}
+$('editCancel').onclick = () => $('editDlg').close();
+$('editSave').onclick = () => {
+  const v = $('editLabel').value.trim();
+  if(v) data.labels[editing] = v; else delete data.labels[editing];
+  save(); $('editDlg').close(); render();
+};
+$('editDelete').onclick = () => {
+  const d = editing;
+  if(ticks(d) > 0){ alert('This rehearsal has ticks. Untick all members first, then delete.'); return; }
+  if(!confirm(`Delete the rehearsal on ${fmt(d)}?`)) return;
+  delete data.extras[d]; delete data.labels[d];
+  if(weekday(d)===1) data.skipped[d] = true;
+  save(); $('editDlg').close(); render();
+};
+
+/* ---------- Backup ---------- */
+$('backupBtn').onclick = () => {
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `camerata-attendance-${todayIso()}.json`;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+$('restoreBtn').onclick = () => $('restoreFile').click();
+$('restoreFile').onchange = e => {
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try{
+      const d = JSON.parse(r.result);
+      if(!d || !Array.isArray(d.members) || typeof d.att !== 'object') throw 0;
+      if(!confirm('Replace all data on this device with this backup?')) return;
+      data = Object.assign(blank(), d); save(); render();
+    }catch(err){ alert('This file is not a Camerata attendance backup.'); }
+    e.target.value = '';
+  };
+  r.readAsText(f);
+};
+
+render();
+})();
+</script>
+</body>
+</html>
