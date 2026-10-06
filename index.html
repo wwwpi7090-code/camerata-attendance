@@ -58,6 +58,9 @@ td.cell:active{background:#d3ece9}
 .today{background:var(--today)}
 tr.removed .name{color:var(--muted);font-style:italic}
 .empty{padding:28px 16px;text-align:center;color:var(--muted)}
+tr.part td{background:#e9f2f2;border-bottom:1px solid var(--rule)}
+tr.part td.name{background:#e9f2f2;font-size:.8rem;font-weight:700;color:var(--teal);height:30px;letter-spacing:.03em}
+.stats .ph{font-size:.8rem;font-weight:700;color:var(--teal);padding:10px 0 2px;border-top:1px solid var(--rule)}
 
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 28px}
 
@@ -84,7 +87,10 @@ dialog input[type=text],dialog input[type=date]{width:100%;font:inherit;min-heig
   border:1px solid var(--rule);border-radius:8px;background:#fff;color:var(--ink)}
 .dlg-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
 .mrow{display:flex;gap:8px;margin-bottom:8px}
-.mrow input{flex:1}
+.mrow{flex-wrap:wrap}
+.mrow input{flex:1 1 100%;min-width:0}
+.mrow select{flex:1;font:inherit;min-height:44px;border:1px solid var(--rule);border-radius:8px;background:#fff;color:var(--ink);padding:0 6px}
+#mEdit .mrow{padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid var(--rule)}
 .mlist{max-height:50vh;overflow-y:auto;padding-right:2px}
 .removed-list{margin-top:14px;border-top:1px solid var(--rule);padding-top:10px}
 .removed-list .mrow span{flex:1;align-self:center;color:var(--muted)}
@@ -131,6 +137,7 @@ dialog input[type=text],dialog input[type=date]{width:100%;font:inherit;min-heig
   <label for="newName">Add member</label>
   <div class="mrow">
     <input type="text" id="newName" placeholder="Full name" autocomplete="off">
+    <select id="newPart" aria-label="Part"></select>
     <button class="primary" id="addMemberBtn">Add</button>
   </div>
   <div id="removedBox"></div>
@@ -168,6 +175,7 @@ dialog input[type=text],dialog input[type=date]{width:100%;font:inherit;min-heig
 const KEY = 'camerata-attendance-v1';
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const MONTH = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const PARTS = ['Conductor','Accompanist','Soprano','Alto','Tenor','Bass'];
 const DAY = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
 /* ---------- Data ----------
@@ -225,9 +233,27 @@ let vy = now.getFullYear(), vm = now.getMonth();
 const $ = id => document.getElementById(id);
 function el(tag, cls, text){ const e = document.createElement(tag); if(cls) e.className = cls; if(text!=null) e.textContent = text; return e; }
 
-// Members shown for a set of dates: active ones, plus removed ones who have ticks there
+// Members shown for a set of dates: active ones, plus removed ones who have ticks there.
+// Sorted by part (Conductor → Bass, then no part), keeping entry order within a part.
+const partRank = p => { const i = PARTS.indexOf(p); return i < 0 ? PARTS.length : i; };
 function membersFor(dates){
-  return data.members.filter(m => !m.removed || dates.some(d => isOn(d, m.id)));
+  return data.members
+    .map((m,i) => [m,i])
+    .filter(([m]) => !m.removed || dates.some(d => isOn(d, m.id)))
+    .sort((a,b) => partRank(a[0].part) - partRank(b[0].part) || a[1] - b[1])
+    .map(([m]) => m);
+}
+const partName = m => PARTS.includes(m.part) ? m.part : 'No part';
+function partSelect(value){
+  const s = document.createElement('select');
+  s.setAttribute('aria-label','Part');
+  ['', ...PARTS].forEach(p => {
+    const o = document.createElement('option');
+    o.value = p; o.textContent = p || '— Part —';
+    if(p === (value || '')) o.selected = true;
+    s.append(o);
+  });
+  return s;
 }
 
 /* ---------- Render ---------- */
@@ -275,7 +301,16 @@ function renderGrid(){
   const thead = el('thead'); thead.append(hr); t.append(thead);
 
   const tb = el('tbody');
+  let lastPart = null;
+  const anyPart = members.some(m => PARTS.includes(m.part));
   members.forEach(m => {
+    if(anyPart && partName(m) !== lastPart){
+      lastPart = partName(m);
+      const pr = el('tr','part');
+      pr.append(el('td','name', lastPart));
+      if(dates.length){ const f = el('td'); f.colSpan = dates.length; pr.append(f); }
+      tb.append(pr);
+    }
     const tr = el('tr', m.removed ? 'removed' : '');
     const nm = el('td','name', m.name + (m.removed ? ' (removed)' : ''));
     nm.title = m.name; tr.append(nm);
@@ -315,7 +350,10 @@ function statList(box, dates){
   const held = dates.filter(d => ticks(d) > 0);
   const members = membersFor(held);
   if(!held.length){ const r = el('div','row'); r.append(el('span','n','No attendance recorded yet.')); box.append(r); return 0; }
+  let lastPart = null;
+  const anyPart = members.some(m => PARTS.includes(m.part));
   members.forEach(m => {
+    if(anyPart && partName(m) !== lastPart){ lastPart = partName(m); box.append(el('div','ph', lastPart)); }
     const c = held.filter(d => isOn(d, m.id)).length;
     const r = el('div','row');
     r.append(el('span','n', m.name + (m.removed ? ' (removed)' : '')));
@@ -356,13 +394,15 @@ function renderMembersDlg(){
       const v = inp.value.trim();
       if(v){ m.name = v; save(); render(); } else inp.value = m.name;
     };
+    const sel = partSelect(m.part);
+    sel.onchange = () => { m.part = sel.value; save(); render(); };
     const rm = el('button','danger','Remove');
     rm.onclick = () => {
       if(confirm(`Remove ${m.name}?\nTheir past attendance stays in the statistics.`)){
         m.removed = true; save(); renderMembersDlg(); render();
       }
     };
-    r.append(inp, rm); box.append(r);
+    r.append(inp, sel, rm); box.append(r);
   });
 
   const rb = $('removedBox'); rb.innerHTML = '';
@@ -380,11 +420,15 @@ function renderMembersDlg(){
     rb.append(wrap);
   }
 }
-function openMembers(){ renderMembersDlg(); $('membersDlg').showModal(); }
+function openMembers(){
+  const np = $('newPart'), keep = np.value;
+  np.replaceWith(Object.assign(partSelect(keep), {id:'newPart'}));
+  renderMembersDlg(); $('membersDlg').showModal();
+}
 function addMember(){
   const v = $('newName').value.trim();
   if(!v) return;
-  data.members.push({id:newId(), name:v, removed:false});
+  data.members.push({id:newId(), name:v, part:$('newPart').value, removed:false});
   save(); $('newName').value = ''; renderMembersDlg(); render(); $('newName').focus();
 }
 $('membersBtn').onclick = openMembers;
