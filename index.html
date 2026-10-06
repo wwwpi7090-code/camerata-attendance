@@ -94,6 +94,17 @@ dialog input[type=text],dialog input[type=date]{width:100%;font:inherit;min-heig
 .mlist{max-height:50vh;overflow-y:auto;padding-right:2px}
 .removed-list{margin-top:14px;border-top:1px solid var(--rule);padding-top:10px}
 .removed-list .mrow span{flex:1;align-self:center;color:var(--muted)}
+.sync{font-size:.82rem;margin:-10px 0 14px;color:var(--muted)}
+.sync::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:#9aa;margin-right:6px;vertical-align:1px}
+.sync.ok::before{background:#2e9d6a}
+.sync.wait::before{background:#e0a020}
+.sync.err::before{background:#c0392b}
+#pinScreen{position:fixed;inset:0;z-index:50;background:var(--page);display:none;align-items:center;justify-content:center;padding:24px}
+#pinScreen.show{display:flex}
+#pinScreen .card{background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:22px;width:min(360px,100%)}
+#pinScreen input{width:100%;font:inherit;font-size:1.3rem;letter-spacing:.2em;text-align:center;min-height:52px;border:1px solid var(--rule);border-radius:8px;margin:12px 0}
+#pinScreen button{width:100%}
+#pinMsg{color:#b3261e;font-size:.9rem;min-height:1.2em}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -101,6 +112,7 @@ dialog input[type=text],dialog input[type=date]{width:100%;font:inherit;min-heig
 <div class="wrap">
   <h1>CAMERATA <b>ATTENDANCE</b></h1>
   <div class="summary" id="summary"></div>
+  <div class="sync" id="sync">Connecting…</div>
 
   <div class="bar">
     <button class="icon" id="prev" aria-label="Previous month">‹</button>
@@ -123,11 +135,22 @@ dialog input[type=text],dialog input[type=date]{width:100%;font:inherit;min-heig
   <p class="note">A rehearsal is counted in the statistics once at least one member is ticked. Mondays with no ticks (holidays, future dates) are ignored.</p>
 
   <footer>
-    Data is saved on this device only.
+    Records are saved online.
     <button class="plain" id="backupBtn">Download backup</button>
     <button class="plain" id="restoreBtn">Restore backup</button>
     <input type="file" id="restoreFile" accept="application/json,.json" hidden>
   </footer>
+</div>
+
+<!-- PIN -->
+<div id="pinScreen">
+  <div class="card">
+    <h1>CAMERATA <b>ATTENDANCE</b></h1>
+    <p>Enter the choir PIN. You only need to do this once on each device.</p>
+    <input type="password" id="pinInput" inputmode="numeric" autocomplete="off" aria-label="Choir PIN">
+    <div id="pinMsg"></div>
+    <button class="primary" id="pinBtn">Open</button>
+  </div>
 </div>
 
 <!-- Members -->
@@ -194,9 +217,115 @@ function load(){
   return blank();
 }
 let data = load();
+
+/* ---------- Online sync ----------
+ Every change is applied on screen at once, kept on this device, and put in a queue.
+ The queue is sent to the online book (/api/data) in order. If there is no internet,
+ the changes wait on this device and are sent when the connection comes back. */
+const QKEY = 'camerata-queue-v1', PINKEY = 'camerata-pin';
+let pin = ''; try{ pin = localStorage.getItem(PINKEY) || ''; }catch(e){}
+let queue = []; try{ queue = JSON.parse(localStorage.getItem(QKEY)) || []; }catch(e){}
+let flushing = false, askedUpload = false, lastError = '';
+
+function saveLocal(){
+  try{ localStorage.setItem(KEY, JSON.stringify(data)); localStorage.setItem(QKEY, JSON.stringify(queue)); }
+  catch(e){}
+}
+const metaOf = () => ({members:data.members, extras:data.extras, skipped:data.skipped, labels:data.labels});
+const ticksOf = () => Object.keys(data.att).flatMap(d => Object.keys(data.att[d]).map(id => `${d}|${id}`));
+
+// members / rehearsal changes
 function save(){
-  try{ localStorage.setItem(KEY, JSON.stringify(data)); }
-  catch(e){ alert('Could not save on this device. Please download a backup.'); }
+  queue = queue.filter(o => o.op !== 'meta');
+  queue.push({op:'meta', meta:metaOf()});
+  saveLocal(); flush();
+}
+function queueTick(date, id, on){
+  queue.push({op:'tick', date, id, on});
+  saveLocal(); flush();
+}
+
+async function api(method, body){
+  const r = await fetch('/api/data', {
+    method, headers:{'Content-Type':'application/json', 'x-pin':pin},
+    body: body ? JSON.stringify(body) : undefined, cache:'no-store'
+  });
+  if(r.status === 401){ const e = new Error('pin'); e.pin = true; throw e; }
+  if(!r.ok){ let j = {}; try{ j = await r.json(); }catch(x){} throw new Error(j.error || ('HTTP ' + r.status)); }
+  return r.json();
+}
+
+function setSync(){
+  const el = $('sync');
+  if(lastError === 'not-configured'){ el.className = 'sync err'; el.textContent = 'Online storage is not set up yet'; return; }
+  if(queue.length){
+    el.className = 'sync wait';
+    el.textContent = navigator.onLine === false || lastError
+      ? `No connection: ${queue.length} change${queue.length>1?'s':''} waiting on this device`
+      : 'Saving…';
+    return;
+  }
+  if(lastError){ el.className = 'sync err'; el.textContent = 'Cannot reach the online book. Showing records saved on this device.'; return; }
+  el.className = 'sync ok'; el.textContent = 'Saved online';
+}
+
+async function flush(){
+  if(flushing || !pin) return;
+  flushing = true; setSync();
+  while(queue.length){
+    try{ await api('POST', queue[0]); queue.shift(); lastError = ''; saveLocal(); }
+    catch(e){ if(e.pin) showPin('Please enter the choir PIN again.'); else lastError = e.message || 'offline'; break; }
+  }
+  flushing = false; setSync();
+}
+
+function fromServer(meta, ticks){
+  const d = Object.assign(blank(), meta || {}, {att:{}});
+  (ticks || []).forEach(f => { const [date,id] = f.split('|'); (d.att[date] = d.att[date] || {})[id] = 1; });
+  return d;
+}
+
+async function pull(){
+  if(!pin) return;
+  if(queue.length){ await flush(); if(queue.length) return; }
+  try{
+    const r = await api('GET');
+    lastError = '';
+    if(!r.meta){
+      // Online book is empty: offer to upload what this phone already has (first switch-over)
+      if(data.members.length && !askedUpload){
+        askedUpload = true;
+        if(confirm(`The online book is empty.\nUpload the ${data.members.filter(m=>!m.removed).length} members and attendance saved on this phone?`)){
+          queue = [{op:'import', meta:metaOf(), ticks:ticksOf()}]; saveLocal(); await flush(); return;
+        }
+      }
+      if(!data.members.length){ data = blank(); saveLocal(); render(); }
+      setSync(); return;
+    }
+    data = fromServer(r.meta, r.ticks); saveLocal(); render();
+  }catch(e){
+    if(e.pin) showPin(pin ? 'Wrong PIN. Please try again.' : '');
+    else lastError = e.message || 'offline';
+  }
+  setSync();
+}
+
+function showPin(msg){
+  $('pinMsg').textContent = msg || '';
+  $('pinScreen').classList.add('show');
+  setTimeout(() => $('pinInput').focus(), 50);
+}
+async function submitPin(){
+  const v = $('pinInput').value.trim();
+  if(!v) return;
+  pin = v;
+  try{ await api('GET'); }
+  catch(e){
+    if(e.pin){ $('pinMsg').textContent = 'Wrong PIN. Please try again.'; return; }
+  }
+  try{ localStorage.setItem(PINKEY, pin); }catch(e){}
+  $('pinScreen').classList.remove('show'); $('pinInput').value = '';
+  pull();
 }
 
 /* ---------- Dates ---------- */
@@ -333,10 +462,10 @@ function renderGrid(){
 
 function toggle(d, id, td){
   if(!data.att[d]) data.att[d] = {};
-  if(data.att[d][id]) delete data.att[d][id]; else data.att[d][id] = 1;
+  const on = !data.att[d][id];
+  if(on) data.att[d][id] = 1; else delete data.att[d][id];
   if(!Object.keys(data.att[d]).length) delete data.att[d];
-  save();
-  const on = isOn(d,id);
+  queueTick(d, id, on);
   td.classList.toggle('on', on);
   td.setAttribute('aria-checked', on);
   renderSummary();
@@ -495,15 +624,24 @@ $('restoreFile').onchange = e => {
     try{
       const d = JSON.parse(r.result);
       if(!d || !Array.isArray(d.members) || typeof d.att !== 'object') throw 0;
-      if(!confirm('Replace all data on this device with this backup?')) return;
-      data = Object.assign(blank(), d); save(); render();
+      if(!confirm('Replace the online attendance book (for everyone) with this backup?')) return;
+      data = Object.assign(blank(), d);
+      queue = [{op:'import', meta:metaOf(), ticks:ticksOf()}];
+      saveLocal(); render(); flush();
     }catch(err){ alert('This file is not a Camerata attendance backup.'); }
     e.target.value = '';
   };
   r.readAsText(f);
 };
 
-render();
+$('pinBtn').onclick = submitPin;
+$('pinInput').onkeydown = e => { if(e.key==='Enter'){ e.preventDefault(); submitPin(); } };
+window.addEventListener('online', () => { lastError = ''; pull(); });
+document.addEventListener('visibilitychange', () => { if(document.visibilityState==='visible') pull(); });
+setInterval(() => { if(document.visibilityState==='visible') pull(); }, 30000);
+
+render(); setSync();
+if(pin) pull(); else showPin('');
 })();
 </script>
 </body>
